@@ -3,4 +3,6 @@
 aai
 ask-ai-cli
 
+# config files
 config.yaml
+config.yml

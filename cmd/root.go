@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"github.com/TomaszDomagala/ask-ai-cli/pkg/config"
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
 
 	"github.com/rs/zerolog"
@@ -11,11 +13,6 @@ import (
 	"github.com/rs/zerolog/pkgerrors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
-
-// defaults
-const (
-	defaultProvider = "openai"
 )
 
 // defaults
@@ -27,18 +24,9 @@ var (
 	}
 )
 
-type ConfigFields struct {
-	Provider   string
-	ApiKey     string
-	ConfigPath string
-	LogLevel   string
-}
-
-var cfgFields = ConfigFields{
-	Provider:   "provider",
-	ApiKey:     "apikey",
-	ConfigPath: "config",
-	LogLevel:   "loglevel",
+type GlobalConfig struct {
+	Provider string `name:"provider" value:"openai" usage:"provider to use"`
+	LogLevel string `name:"loglevel" value:"disabled" usage:"log level (zerolog)"`
 }
 
 var providerConfig *viper.Viper
@@ -56,25 +44,27 @@ Example:
 
 	Args: cobra.ExactArgs(1),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Init config
 		var err error
+		var conf GlobalConfig
 
-		configPath, err := cmd.Flags().GetString(cfgFields.ConfigPath)
+		globalCfg := GetGlobalConfig(cmd.Context())
+
+		configPath, err := cmd.Flags().GetString("config")
 		if err != nil {
 			return fmt.Errorf("failed to get config path flag: %w", err)
 		}
 
 		if configPath != "" {
-			viper.SetConfigFile(configPath)
+			globalCfg.SetConfigFile(configPath)
 		} else {
-			viper.SetConfigName("config")
-			viper.SetConfigType("yaml")
+			globalCfg.SetConfigName("config")
+			globalCfg.SetConfigType("yaml")
 			for _, path := range defaultConfigPaths {
-				viper.AddConfigPath(path)
+				globalCfg.AddConfigPath(path)
 			}
 		}
 
-		err = viper.ReadInConfig()
+		err = globalCfg.ReadInConfig()
 		if err != nil {
 			// Ignore config file not found error, we will use defaults
 			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -83,18 +73,20 @@ Example:
 			}
 		}
 
-		if err = viper.BindPFlag(cfgFields.Provider, cmd.Flags().Lookup(cfgFields.Provider)); err != nil {
-			return fmt.Errorf("failed to bind provider flag: %w", err)
+		if err = globalCfg.BindPFlags(cmd.PersistentFlags()); err != nil {
+			return fmt.Errorf("failed to bind flags: %w", err)
 		}
-		provider := viper.GetString(cfgFields.Provider)
-		providerConfig = viper.Sub(fmt.Sprintf("providers.%s", provider))
-
-		err = providerConfig.BindPFlags(cmd.PersistentFlags())
-		if err != nil {
-			return fmt.Errorf("failed to bind flags: %v", err)
+		if err = config.FillWithConfig(globalCfg, &conf); err != nil {
+			return fmt.Errorf("failed to fill config: %w", err)
 		}
 
-		loglevel, err := zerolog.ParseLevel(viper.GetString(cfgFields.LogLevel))
+		providerConfig = globalCfg.Sub(fmt.Sprintf("providers.%s", conf.Provider))
+		if err = config.BindProviderFlags(providerConfig, cmd.PersistentFlags(), conf.Provider); err != nil {
+			return fmt.Errorf("failed to bind provider flags: %w", err)
+		}
+		cmd.SetContext(SetProviderConfig(cmd.Context(), providerConfig))
+
+		loglevel, err := zerolog.ParseLevel(conf.LogLevel)
 		if err != nil {
 			return fmt.Errorf("failed to parse log level: %v", err)
 		}
@@ -106,10 +98,29 @@ Example:
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		query := args[0]
-		client := openai.NewClient(providerConfig.GetString(cfgFields.ApiKey), openai.DefaultCompletionConfig)
+		var err error
+		var globalCfg GlobalConfig
+		var suggester Suggester
 
-		response, err := client.Suggest(query)
+		ctx := cmd.Context()
+
+		if err = config.FillWithConfig(GetGlobalConfig(ctx), &globalCfg); err != nil {
+			return fmt.Errorf("failed to fill global config: %w", err)
+		}
+
+		switch globalCfg.Provider {
+		case "openai":
+			var openaiCfg openai.Config
+			if err = config.FillWithConfig(GetProviderConfig(ctx), &openaiCfg); err != nil {
+				return fmt.Errorf("failed to fill openai config: %w", err)
+			}
+			suggester = openai.NewClient(openaiCfg)
+		default:
+			return fmt.Errorf("unknown provider: %v", globalCfg.Provider)
+		}
+
+		query := args[0]
+		response, err := suggester.Suggest(query)
 		if err != nil {
 			return fmt.Errorf("failed to suggest a command: %w", err)
 		}
@@ -130,19 +141,23 @@ func Execute() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	err := rootCmd.Execute()
+	global := viper.New()
+
+	ctx := context.Background()
+	ctx = SetGlobalConfig(ctx, global)
+
+	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {
-		log.Error().Stack().Err(err).Msg("failed to execute root command")
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	// Local flags
+	// Global flags independent of provider
 	rootCmd.PersistentFlags().String("config", "", fmt.Sprintf("config file - if not provided, the following paths will be checked: %v", fmt.Sprint(defaultConfigPaths)))
+	config.FlagsFromStruct(rootCmd.PersistentFlags(), GlobalConfig{}, "")
 
-	// Persistent flags
-	rootCmd.PersistentFlags().String("apikey", "", "api key for the provider")
-	rootCmd.PersistentFlags().StringP("provider", "p", defaultProvider, "provider to use")
-	rootCmd.PersistentFlags().String("loglevel", "DISABLED", "zerolog log level")
+	// Provider specific flags
+	config.FlagsFromStruct(rootCmd.PersistentFlags(), openai.Config{}, "openai")
 }

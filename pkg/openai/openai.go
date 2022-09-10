@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -22,40 +23,38 @@ var (
 	errNoSuggestionFound = fmt.Errorf("no suggestion found")
 )
 
-// CompletionConfig represents a base configuration for a completionRequest
-type CompletionConfig struct {
-	Model            string  `json:"model"`
-	Temperature      float64 `json:"temperature"`
-	MaxTokens        int     `json:"max_tokens"`
-	TopP             float64 `json:"top_p"`
-	FrequencyPenalty float64 `json:"frequency_penalty"`
-	PresencePenalty  float64 `json:"presence_penalty"`
-}
+//// CompletionConfig represents a base configuration for a completionRequest
+//type CompletionConfig struct {
+//	Model            string  `json:"model"`
+//	Temperature      float64 `json:"temperature"`
+//	MaxTokens        int     `json:"max_tokens"`
+//	TopP             float64 `json:"top_p"`
+//	FrequencyPenalty float64 `json:"frequency_penalty"`
+//	PresencePenalty  float64 `json:"presence_penalty"`
+//}
 
-// DefaultCompletionConfig is a default configuration for completion.
-var DefaultCompletionConfig = CompletionConfig{
-	Model:            "code-davinci-002",
-	Temperature:      0,
-	MaxTokens:        256,
-	TopP:             1,
-	FrequencyPenalty: 0,
-	PresencePenalty:  0,
-}
+//// DefaultCompletionConfig is a default configuration for completion.
+//var DefaultCompletionConfig = CompletionConfig{
+//	Model:            "code-davinci-002",
+//	Temperature:      0,
+//	MaxTokens:        256,
+//	TopP:             1,
+//	FrequencyPenalty: 0,
+//	PresencePenalty:  0,
+//}
 
 type Client struct {
-	Config CompletionConfig
-	apikey string
+	Config Config
 }
 
-func NewClient(apikey string, config CompletionConfig) *Client {
+func NewClient(config Config) *Client {
 	return &Client{
-		apikey: apikey,
 		Config: config,
 	}
 }
 
 type requestBody struct {
-	CompletionConfig
+	RequestBase
 	Prompt string   `json:"prompt"`
 	Stop   []string `json:"stop"`
 }
@@ -92,6 +91,7 @@ type errorResponse struct {
 /*
 prompt creates a prompt for a completion request.
 Example of a prompt with a query "show current directory":
+
 	command-query: create foo directory:
 	mkdir foo
 	command-query: show current directory:
@@ -106,10 +106,11 @@ func promptQuery(query string) string {
 }
 
 func (c *Client) Suggest(query string) (string, error) {
+
 	reqBody := requestBody{
-		CompletionConfig: c.Config,
-		Prompt:           prompt(query),
-		Stop:             []string{queryPrefixSequence},
+		RequestBase: c.Config.RequestBase,
+		Prompt:      prompt(query),
+		Stop:        []string{queryPrefixSequence},
 	}
 	jsonReqBody, err := json.Marshal(reqBody)
 	if err != nil {
@@ -120,7 +121,7 @@ func (c *Client) Suggest(query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.apikey))
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.Config.ApiKey))
 	req.Header.Add("Content-Type", "application/json")
 
 	for k, v := range req.Header {
@@ -158,5 +159,5 @@ func (c *Client) Suggest(query string) (string, error) {
 		return "", fmt.Errorf("no completion found")
 	}
 
-	return completion.Choices[0].Text, nil
+	return strings.TrimSpace(completion.Choices[0].Text), nil
 }
