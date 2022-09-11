@@ -35,8 +35,14 @@ var providerConfig *viper.Viper
 var rootCmd = &cobra.Command{
 	Use:   `aai [query]`,
 	Short: "Ask AI to suggest a command",
-	Long: `ask-ai-cli (aai) is a command line tool that helps you to find a command you need.
+	Long: `
+ask-ai-cli (aai)
+A command line tool that helps you to find a command you need.
 It uses AI to suggest a command based on your query.
+
+It is advised to not use suggestions blindly,
+but rather to read the documentation and understand
+what the command does before running it.
 
 Example:
     aai "show files with size greater than 1MB"
