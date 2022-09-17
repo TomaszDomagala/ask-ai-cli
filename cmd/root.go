@@ -25,7 +25,7 @@ var (
 )
 
 type GlobalConfig struct {
-	Provider string `name:"provider" value:"openai" usage:"provider to use"`
+	Provider string `name:"provider" value:"openai" usage:"provider to use" validate:"required"`
 	LogLevel string `name:"loglevel" value:"disabled" usage:"log level (zerolog)"`
 }
 
