@@ -25,11 +25,12 @@ var (
 )
 
 type GlobalConfig struct {
-	Provider string `name:"provider" value:"openai" usage:"provider to use" validate:"required"`
-	LogLevel string `name:"loglevel" value:"disabled" usage:"log level (zerolog)"`
+	ConfigFile config.Value[string]
+	Provider   config.Value[string]
+	LogLevel   config.Value[string]
 }
 
-var providerConfig *viper.Viper
+var globalConfig GlobalConfig
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -162,8 +163,8 @@ func Execute() {
 func init() {
 	// Global flags independent of provider
 	rootCmd.PersistentFlags().String("config", "", fmt.Sprintf("config file - if not provided, the following paths will be checked: %v", fmt.Sprint(defaultConfigPaths)))
-	config.FlagsFromStruct(rootCmd.PersistentFlags(), GlobalConfig{}, "")
+	globalConfig = GlobalConfig{
+		ConfigFile: config.String("configFile"),
+	}
 
-	// Provider specific flags
-	config.FlagsFromStruct(rootCmd.PersistentFlags(), openai.Config{}, "openai")
 }
