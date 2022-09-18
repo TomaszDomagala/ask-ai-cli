@@ -1,95 +1,116 @@
+// Package config is a wrapper around viper that provides
+// a consistent way to access configuration values.
 package config
 
 import (
-	"fmt"
-	"reflect"
-	"strings"
-
-	"github.com/mitchellh/mapstructure"
-	"github.com/spf13/cast"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
-func FillWithConfig(config *viper.Viper, input interface{}) error {
-	return config.Unmarshal(input, func(config *mapstructure.DecoderConfig) {
-		config.TagName = "name"
-	})
+// Value is an interface that can be used to get values from a config.
+type Value[T any] interface {
+	Key() string
+	IsSet() bool
+
+	Get() T
+	Set(T)
 }
 
-func BindProviderFlags(conf *viper.Viper, flags *pflag.FlagSet, provider string) error {
-	var firstErr error
-	prefix := provider + "-"
+// viperGetter is a function that returns a value from the viper config.
+type viperGetter[T any] func(*viper.Viper, string) T
 
-	flags.VisitAll(func(flag *pflag.Flag) {
-		if strings.HasPrefix(flag.Name, prefix) {
-			if err := conf.BindPFlag(strings.TrimPrefix(flag.Name, prefix), flag); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-	})
-	return firstErr
+// pflagSetter is a function that creates a flag for the provided flag set.
+type pflagSetter[T any] func(f *pflag.FlagSet, name, shorthand string, value T, usage string) *T
+
+// configValue is a wrapper around a viper config value.
+type configValue[T any] struct {
+	// config is the viper instance that holds the configuration.
+	// It can be set by calling Attach.
+	config *viper.Viper
+	// key is the key of the value in the config.
+	key string
+	// getter is a function that returns the value associated with the key as a type T.
+	getter viperGetter[T]
+	// flagSetter is a function that creates a flag for the provided flag set.
+	flagSetter pflagSetter[T]
+	// flag is the optional flag associated with the value.
+	flag *pflag.Flag
+	// flagValue is the optional flag value associated with the value.
+	flagValue *T
+
+	// postAttach is a list of functions that are executed after Attach method is called.
+	postAttach []func() error
 }
 
-// FlagsFromStruct adds flags to the provided flags set from the struct tags.
-// It reads the tags: name, shorthand, value, usage.
-// prefix is added to the flag name with a dash separator.
-func FlagsFromStruct(flags *pflag.FlagSet, input interface{}, prefix string) {
-	tags := structTags(input, []string{"name", "shorthand", "value", "usage"})
-	types := structFieldType(input)
+func (v *configValue[T]) Get() T {
+	return v.getter(v.config, v.key)
+}
 
-	t := reflect.TypeOf(input)
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		fieldName := field.Name
-		fieldType := types[fieldName]
-		fieldTags := tags[fieldName]
-		name := fieldTags["name"]
-		shorthand := fieldTags["shorthand"]
-		value := fieldTags["value"]
-		usage := fieldTags["usage"]
+func (v *configValue[T]) Key() string {
+	return v.key
+}
 
-		if prefix != "" {
-			name = prefix + "-" + name
-		}
+func (v *configValue[T]) Set(value T) {
+	v.config.Set(v.key, value)
+}
 
-		switch fieldType.Kind() {
-		case reflect.String:
-			flags.StringP(name, shorthand, cast.ToString(value), usage)
-		case reflect.Int:
-			flags.IntP(name, shorthand, cast.ToInt(value), usage)
-		case reflect.Float64:
-			flags.Float64P(name, shorthand, cast.ToFloat64(value), usage)
-		case reflect.Struct:
-			FlagsFromStruct(flags, reflect.New(fieldType).Elem().Interface(), prefix)
-		default:
-			panic(fmt.Sprintf("unsupported type %s, field %s", fieldType.Kind(), fieldName))
-		}
+func (v *configValue[T]) IsSet() bool {
+	return v.config.IsSet(v.key)
+}
+
+type Option[T any] func(*configValue[T])
+
+// WithFlagP is like WithFlag, but accepts a shorthand letter that can be used after a single dash.
+func WithFlagP[T any](f *pflag.FlagSet, name, shorthand string, value T, usage string) Option[T] {
+	return func(v *configValue[T]) {
+		v.flagValue = v.flagSetter(f, name, shorthand, value, usage)
+		v.flag = f.Lookup(name)
+
+		//v.postAttach = append(v.postAttach, func() error {
+		//	if err := v.config.BindPFlag(v.key, v.flag); err != nil {
+		//		return fmt.Errorf("failed to bind flag %q to config key %q: %w", v.flag.Name, v.key, err)
+		//	}
+		//	return nil
+		//})
 	}
 }
 
-// structTags returns tags values per field name of a struct
-func structTags(input interface{}, tags []string) map[string]map[string]string {
-	t := reflect.TypeOf(input)
-	sTags := make(map[string]map[string]string)
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		fieldTags := make(map[string]string)
-		for _, tag := range tags {
-			fieldTags[tag] = field.Tag.Get(tag)
-		}
-		sTags[field.Name] = fieldTags
-	}
-	return sTags
+// WithFlag defines a flag with specified name, default value, and usage string.
+func WithFlag[T any](f *pflag.FlagSet, name string, value T, usage string) Option[T] {
+	return WithFlagP(f, name, "", value, usage)
 }
 
-// structFieldType returns field type per field name of a struct
-func structFieldType(input interface{}) map[string]reflect.Type {
-	t := reflect.TypeOf(input)
-	sTypes := make(map[string]reflect.Type)
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		sTypes[field.Name] = field.Type
+// WithDefault sets the default value for the config value.
+func WithDefault[T any](value T) Option[T] {
+	return func(v *configValue[T]) {
+		v.config.SetDefault(v.key, value)
 	}
-	return sTypes
+}
+
+// newValue creates a new config configValue.
+func newValue[T any](key string, getter viperGetter[T], flagSetter pflagSetter[T], options ...Option[T]) *configValue[T] {
+	value := configValue[T]{
+		key:        key,
+		getter:     getter,
+		flagSetter: flagSetter,
+	}
+	for _, option := range options {
+		option(&value)
+	}
+	return &value
+}
+
+// String creates a new config configValue of type string.
+func String(key string, options ...Option[string]) Value[string] {
+	return newValue(key, (*viper.Viper).GetString, (*pflag.FlagSet).StringP, options...)
+}
+
+// Int creates a new config configValue of type int.
+func Int(key string, options ...Option[int]) Value[int] {
+	return newValue(key, (*viper.Viper).GetInt, (*pflag.FlagSet).IntP, options...)
+}
+
+// Float64 creates a new config configValue of type float64.
+func Float64(key string, options ...Option[float64]) Value[float64] {
+	return newValue(key, (*viper.Viper).GetFloat64, (*pflag.FlagSet).Float64P, options...)
 }
