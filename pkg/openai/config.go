@@ -12,7 +12,7 @@ type RequestBase struct {
 
 type Config struct {
 	// ApiKey is the OpenAI API key.
-	ApiKey string
+	ApiKey string `config:"openai.apikey"`
 
 	// OpenAI request configuration
 	RequestBase

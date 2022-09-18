@@ -22,6 +22,12 @@ func (f Flag[T]) Get() T {
 	return *f.flagValue
 }
 
+// Changed returns true if the flag was explicitly set during Parse() and false
+// otherwise
+func (f Flag[T]) Changed() bool {
+	return f.flags.Changed(f.name)
+}
+
 // flagSetter is a function from pflag.FlagSet that creates the flag.
 // Example: (*pflag.FlagSet).StringP, (*pflag.FlagSet).IntP, etc.
 type flagSetter[T any] func(f *pflag.FlagSet, name, shorthand string, value T, usage string) *T
@@ -52,4 +58,14 @@ func String(flags *pflag.FlagSet, name string, value string, usage string) Flag[
 // StringP is like String, but accepts a shorthand letter that can be used after a single dash.
 func StringP(flags *pflag.FlagSet, name, shorthand string, value string, usage string) Flag[string] {
 	return newFlagP(flags, (*pflag.FlagSet).StringP, name, shorthand, value, usage)
+}
+
+// Bool defines a bool flag with specified name, default value, and usage string.
+func Bool(flags *pflag.FlagSet, name string, value bool, usage string) Flag[bool] {
+	return newFlag(flags, (*pflag.FlagSet).BoolP, name, value, usage)
+}
+
+// BoolP is like Bool, but accepts a shorthand letter that can be used after a single dash.
+func BoolP(flags *pflag.FlagSet, name, shorthand string, value bool, usage string) Flag[bool] {
+	return newFlagP(flags, (*pflag.FlagSet).BoolP, name, shorthand, value, usage)
 }

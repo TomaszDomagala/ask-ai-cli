@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"github.com/spf13/afero"
 
 	"github.com/spf13/viper"
 )
@@ -15,11 +16,12 @@ func SetGlobalConfig(ctx context.Context, conf *viper.Viper) context.Context {
 	return context.WithValue(ctx, GlobalConfigKey, conf)
 }
 
-const ProviderConfigKey = "providerConfig"
+const FileSystemKey = "fileSystem"
 
-func GetProviderConfig(ctx context.Context) *viper.Viper {
-	return ctx.Value(ProviderConfigKey).(*viper.Viper)
+func GetFs(ctx context.Context) afero.Fs {
+	return ctx.Value(FileSystemKey).(afero.Fs)
 }
-func SetProviderConfig(ctx context.Context, conf *viper.Viper) context.Context {
-	return context.WithValue(ctx, ProviderConfigKey, conf)
+
+func SetFs(ctx context.Context, fs afero.Fs) context.Context {
+	return context.WithValue(ctx, FileSystemKey, fs)
 }

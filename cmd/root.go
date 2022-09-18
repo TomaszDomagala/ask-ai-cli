@@ -3,25 +3,34 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
 	"os"
+	"path/filepath"
 
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/config"
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/config/flags"
+	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// defaults
 var (
+	// defaultConfigPaths is a list of paths to check for config files
 	defaultConfigPaths = []string{
-		"etc/aai/",
+		"/etc/aai/",
 		"$HOME/.aai/",
 		".",
 	}
+	// configFileName is the name of the config file, without extension
+	configFileName = "config"
+	// configFileType is the type of the config file
+	configFileType = "yaml"
+	// firstDefaultConfigFile is the path to the first default config file
+	firstDefaultConfigFile = filepath.Join(defaultConfigPaths[0], configFileName+"."+configFileType)
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -43,10 +52,26 @@ Example:
 
 	Args: cobra.ExactArgs(1),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
 		cfg := GetGlobalConfig(cmd.Context())
 
+		if globalConfig.ConfigFile.Get() != "" {
+			cfg.SetConfigFile(globalConfig.ConfigFile.Get())
+		} else {
+			cfg.SetConfigName(configFileName)
+			cfg.SetConfigType(configFileType)
+			for _, path := range defaultConfigPaths {
+				cfg.AddConfigPath(path)
+			}
+		}
+
+		err = cfg.ReadInConfig()
+		if err != nil {
+			return fmt.Errorf("failed to read config: %w", err)
+		}
+
 		// Setup config by attaching viper to the config struct
-		err := config.Attach(cfg, &globalConfig)
+		err = config.Attach(cfg, &globalConfig)
 
 		if err != nil {
 			return fmt.Errorf("failed to attach config: %w", err)
@@ -101,9 +126,11 @@ func Execute() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	global := viper.New()
+	fs := afero.NewOsFs()
 
 	ctx := context.Background()
 	ctx = SetGlobalConfig(ctx, global)
+	ctx = SetFs(ctx, fs)
 
 	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {

@@ -3,8 +3,6 @@
 package config
 
 import (
-	"fmt"
-
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -12,7 +10,10 @@ import (
 // Value is an interface that can be used to get values from a config.
 type Value[T any] interface {
 	Key() string
+	IsSet() bool
+
 	Get() T
+	Set(T)
 }
 
 // viperGetter is a function that returns a value from the viper config.
@@ -24,6 +25,7 @@ type pflagSetter[T any] func(f *pflag.FlagSet, name, shorthand string, value T, 
 // configValue is a wrapper around a viper config value.
 type configValue[T any] struct {
 	// config is the viper instance that holds the configuration.
+	// It can be set by calling Attach.
 	config *viper.Viper
 	// key is the key of the value in the config.
 	key string
@@ -48,6 +50,14 @@ func (v *configValue[T]) Key() string {
 	return v.key
 }
 
+func (v *configValue[T]) Set(value T) {
+	v.config.Set(v.key, value)
+}
+
+func (v *configValue[T]) IsSet() bool {
+	return v.config.IsSet(v.key)
+}
+
 type Option[T any] func(*configValue[T])
 
 // WithFlagP is like WithFlag, but accepts a shorthand letter that can be used after a single dash.
@@ -56,12 +66,12 @@ func WithFlagP[T any](f *pflag.FlagSet, name, shorthand string, value T, usage s
 		v.flagValue = v.flagSetter(f, name, shorthand, value, usage)
 		v.flag = f.Lookup(name)
 
-		v.postAttach = append(v.postAttach, func() error {
-			if err := v.config.BindPFlag(v.key, v.flag); err != nil {
-				return fmt.Errorf("failed to bind flag %q to config key %q: %w", v.flag.Name, v.key, err)
-			}
-			return nil
-		})
+		//v.postAttach = append(v.postAttach, func() error {
+		//	if err := v.config.BindPFlag(v.key, v.flag); err != nil {
+		//		return fmt.Errorf("failed to bind flag %q to config key %q: %w", v.flag.Name, v.key, err)
+		//	}
+		//	return nil
+		//})
 	}
 }
 
@@ -70,17 +80,11 @@ func WithFlag[T any](f *pflag.FlagSet, name string, value T, usage string) Optio
 	return WithFlagP(f, name, "", value, usage)
 }
 
-// Attach attaches config to the configValue and executes post attach functions,
-// such as binding the flag to the config.
-func (v *configValue[any]) Attach(config *viper.Viper) error {
-	v.config = config
-
-	for _, postAttach := range v.postAttach {
-		if err := postAttach(); err != nil {
-			return err
-		}
+// WithDefault sets the default value for the config value.
+func WithDefault[T any](value T) Option[T] {
+	return func(v *configValue[T]) {
+		v.config.SetDefault(v.key, value)
 	}
-	return nil
 }
 
 // newValue creates a new config configValue.

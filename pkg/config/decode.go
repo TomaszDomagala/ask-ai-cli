@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"reflect"
-
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -25,12 +23,16 @@ import (
 //	var concreteCfg concreteConfig
 //	err := Flatten(cfg, &concreteCfg)
 func Decode(input interface{}, output interface{}) error {
-	m, err := toMap(input)
+	m := make(map[string]any)
+	err := Traverse(input, func(value AnyValue) error {
+		m[value.Key()] = value.GetAny()
+		return nil
+	})
+
 	if err != nil {
 		return fmt.Errorf("failed to convert input to map: %w", err)
 	}
 
-	fmt.Println(m)
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
 		Result:  output,
 		TagName: "config",
@@ -43,47 +45,4 @@ func Decode(input interface{}, output interface{}) error {
 		return fmt.Errorf("failed to decode output: %w", err)
 	}
 	return nil
-}
-
-// anyValue is a weakly typed Value interface.
-type anyValue interface {
-	Key() string
-	getAny() any
-}
-
-// getAny returns the value associated with the key as a type any.
-func (v *configValue[T]) getAny() any {
-	return v.getter(v.config, v.key)
-}
-
-// toMap converts the config to a map.
-func toMap(input any) (map[string]any, error) {
-	v := reflect.ValueOf(input)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("input must be a struct or a pointer to a struct, got %T", input)
-	}
-	t := v.Type()
-	m := make(map[string]interface{})
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-		if field.Anonymous {
-			embedded, err := toMap(v.Field(i).Interface())
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert embedded field %q: %w", field.Name, err)
-			}
-			for key, value := range embedded {
-				m[key] = value
-			}
-		}
-		if value, ok := v.Field(i).Interface().(anyValue); ok {
-			m[value.Key()] = value.getAny()
-		}
-	}
-	return m, nil
 }

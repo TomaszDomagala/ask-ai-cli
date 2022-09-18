@@ -20,7 +20,6 @@ var configViewCmd = &cobra.Command{
 		globalConfig := GetGlobalConfig(ctx)
 
 		if globalConfig.ConfigFileUsed() == "" {
-			fmt.Println("No config file found")
 			return nil
 		}
 
