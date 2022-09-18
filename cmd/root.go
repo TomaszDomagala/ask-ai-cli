@@ -39,7 +39,7 @@ var rootCmd = &cobra.Command{
 	Short: "Ask AI to suggest a command",
 	Long: `
 ask-ai-cli (aai)
-A command line tool that helps you to find a command you need.
+A command line tool that helps you find a command you need.
 It uses AI to suggest a command based on your query.
 
 It is advised to not use suggestions blindly,
