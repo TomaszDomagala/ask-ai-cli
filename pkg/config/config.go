@@ -3,6 +3,7 @@
 package config
 
 import (
+	"fmt"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -11,7 +12,6 @@ import (
 type Value[T any] interface {
 	Key() string
 	IsSet() bool
-
 	Get() T
 	Set(T)
 }
@@ -66,12 +66,12 @@ func WithFlagP[T any](f *pflag.FlagSet, name, shorthand string, value T, usage s
 		v.flagValue = v.flagSetter(f, name, shorthand, value, usage)
 		v.flag = f.Lookup(name)
 
-		//v.postAttach = append(v.postAttach, func() error {
-		//	if err := v.config.BindPFlag(v.key, v.flag); err != nil {
-		//		return fmt.Errorf("failed to bind flag %q to config key %q: %w", v.flag.Name, v.key, err)
-		//	}
-		//	return nil
-		//})
+		v.postAttach = append(v.postAttach, func() error {
+			if err := v.config.BindPFlag(v.key, v.flag); err != nil {
+				return fmt.Errorf("failed to bind flag %q to config key %q: %w", v.flag.Name, v.key, err)
+			}
+			return nil
+		})
 	}
 }
 
