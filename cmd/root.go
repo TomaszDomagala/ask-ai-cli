@@ -3,11 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
 	"os"
 
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/config"
-	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
-
+	"github.com/TomaszDomagala/ask-ai-cli/pkg/config/flags"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
@@ -23,14 +23,6 @@ var (
 		".",
 	}
 )
-
-type GlobalConfig struct {
-	ConfigFile config.Value[string]
-	Provider   config.Value[string]
-	LogLevel   config.Value[string]
-}
-
-var globalConfig GlobalConfig
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -51,79 +43,39 @@ Example:
 
 	Args: cobra.ExactArgs(1),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		var conf GlobalConfig
+		cfg := GetGlobalConfig(cmd.Context())
 
-		globalCfg := GetGlobalConfig(cmd.Context())
+		// Setup config by attaching viper to the config struct
+		err := config.Attach(cfg, &globalConfig)
 
-		configPath, err := cmd.Flags().GetString("config")
 		if err != nil {
-			return fmt.Errorf("failed to get config path flag: %w", err)
+			return fmt.Errorf("failed to attach config: %w", err)
 		}
 
-		if configPath != "" {
-			globalCfg.SetConfigFile(configPath)
-		} else {
-			globalCfg.SetConfigName("config")
-			globalCfg.SetConfigType("yaml")
-			for _, path := range defaultConfigPaths {
-				globalCfg.AddConfigPath(path)
-			}
-		}
-
-		err = globalCfg.ReadInConfig()
-		if err != nil {
-			// Ignore config file not found error, we will use defaults
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				// Another error occurred
-				return fmt.Errorf("failed to read config: %v", err)
-			}
-		}
-
-		if err = globalCfg.BindPFlags(cmd.PersistentFlags()); err != nil {
-			return fmt.Errorf("failed to bind flags: %w", err)
-		}
-		if err = config.FillWithConfig(globalCfg, &conf); err != nil {
-			return fmt.Errorf("failed to fill config: %w", err)
-		}
-
-		providerConfig = globalCfg.Sub(fmt.Sprintf("providers.%s", conf.Provider))
-		if err = config.BindProviderFlags(providerConfig, cmd.PersistentFlags(), conf.Provider); err != nil {
-			return fmt.Errorf("failed to bind provider flags: %w", err)
-		}
-		cmd.SetContext(SetProviderConfig(cmd.Context(), providerConfig))
-
-		loglevel, err := zerolog.ParseLevel(conf.LogLevel)
+		// Setup logs
+		loglevel, err := zerolog.ParseLevel(globalConfig.LogLevel.Get())
 		if err != nil {
 			return fmt.Errorf("failed to parse log level: %v", err)
 		}
 		// From now on, we can use loggers
 		zerolog.SetGlobalLevel(loglevel)
 
-		log.Debug().Msgf("using config file: %v", viper.ConfigFileUsed())
-
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var err error
-		var globalCfg GlobalConfig
 		var suggester Suggester
 
-		ctx := cmd.Context()
-
-		if err = config.FillWithConfig(GetGlobalConfig(ctx), &globalCfg); err != nil {
-			return fmt.Errorf("failed to fill global config: %w", err)
-		}
-
-		switch globalCfg.Provider {
+		switch globalConfig.Provider.Get() {
 		case "openai":
 			var openaiCfg openai.Config
-			if err = config.FillWithConfig(GetProviderConfig(ctx), &openaiCfg); err != nil {
-				return fmt.Errorf("failed to fill openai config: %w", err)
+			err := config.Decode(globalConfig, &openaiCfg)
+			if err != nil {
+				return fmt.Errorf("failed to decode config: %w", err)
 			}
 			suggester = openai.NewClient(openaiCfg)
 		default:
-			return fmt.Errorf("unknown provider: %v", globalCfg.Provider)
+			return fmt.Errorf("unknown provider: %v", globalConfig.Provider.Get())
 		}
 
 		query := args[0]
@@ -160,11 +112,47 @@ func Execute() {
 	}
 }
 
+type GlobalConfig struct {
+	ConfigFile flags.Flag[string]
+	Provider   config.Value[string]
+	LogLevel   config.Value[string]
+
+	OpenAiConfig
+}
+
+type OpenAiConfig struct {
+	// ApiKey for OpenAI API
+	ApiKey config.Value[string]
+
+	// OpenAi request settings.
+	// Description: https://beta.openai.com/docs/api-reference/completions/create
+
+	Model            config.Value[string] // Model
+	Temperature      config.Value[float64]
+	MaxTokens        config.Value[int]
+	TopP             config.Value[float64]
+	FrequencyPenalty config.Value[float64]
+	PresencePenalty  config.Value[float64]
+}
+
+var globalConfig GlobalConfig
+
 func init() {
-	// Global flags independent of provider
-	rootCmd.PersistentFlags().String("config", "", fmt.Sprintf("config file - if not provided, the following paths will be checked: %v", fmt.Sprint(defaultConfigPaths)))
+	// define global config
 	globalConfig = GlobalConfig{
-		ConfigFile: config.String("configFile"),
+		ConfigFile: flags.String(rootCmd.PersistentFlags(), "config", "", fmt.Sprintf("config file - if not provided, the following paths will be checked: %v", fmt.Sprint(defaultConfigPaths))),
+		Provider:   config.String("provider", config.WithFlag(rootCmd.PersistentFlags(), "provider", "openai", "provider to use for suggestions")),
+		LogLevel:   config.String("loglevel", config.WithFlag(rootCmd.PersistentFlags(), "loglevel", "disabled", "log level (zerolog)")),
+
+		OpenAiConfig: OpenAiConfig{
+			ApiKey:           config.String("openai.apikey", config.WithFlag(rootCmd.PersistentFlags(), "openai-apikey", "", "openai api key")),
+			Model:            config.String("openai.model", config.WithFlag(rootCmd.PersistentFlags(), "openai-model", "text-davinci-002", "openai model to use for completion")),
+			Temperature:      config.Float64("openai.temperature", config.WithFlag(rootCmd.PersistentFlags(), "openai-temperature", 0.2, "temperature")),
+			MaxTokens:        config.Int("openai.maxtokens", config.WithFlag(rootCmd.PersistentFlags(), "openai-maxtokens", 100, "max tokens")),
+			TopP:             config.Float64("openai.topp", config.WithFlag(rootCmd.PersistentFlags(), "openai-topp", 1.0, "top p")),
+			FrequencyPenalty: config.Float64("openai.frequencypenalty", config.WithFlag(rootCmd.PersistentFlags(), "openai-frequencypenalty", 0.0, "frequency penalty")),
+			PresencePenalty:  config.Float64("openai.presencepenalty", config.WithFlag(rootCmd.PersistentFlags(), "openai-presencepenalty", 0.0, "presence penalty")),
+		},
 	}
 
 }
