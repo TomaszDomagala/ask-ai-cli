@@ -44,9 +44,10 @@ make build
 ### Setup
 aai will search for config.yaml file in the following locations: `/etc/aai/`, `$HOME/.aai/`, `.`. Before using it, we need to create the config file.
 
-Set the OpenAI API key and create the file in `/etc/aai/`, you can create one [here](https://beta.openai.com/account/api-keys).
+Set the OpenAI API key (you can get one [here](https://beta.openai.com/account/api-keys))
+and create the file in the `$HOME/.aai/` directory.
 ```bash
-aai config set --file /etc/aai/ --openai-apikey sk-XXX
+aai config set --file $HOME/.aai/config.yaml --openai-apikey sk-XXX
 ```
 
 You can permanently set OpenAI request options with flags, for example, you can change the model that is used to generate suggestions.
