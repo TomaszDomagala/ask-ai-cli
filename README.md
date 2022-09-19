@@ -46,9 +46,10 @@ aai will search for config.yaml file in the following locations: `/etc/aai/`, `$
 
 Set the OpenAI API key and create the file in `/etc/aai/`, you can create one [here](https://beta.openai.com/account/api-keys).
 ```bash
-aai config set --create --openai-apikey sk-XXX
+aai config set --file /etc/aai/ --openai-apikey sk-XXX
 ```
 
 You can permanently set OpenAI request options with flags, for example, you can change the model that is used to generate suggestions.
 ```bash
 aai config set --openai-model code-davinci-002
+```

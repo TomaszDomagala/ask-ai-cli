@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/config"
-	"github.com/TomaszDomagala/ask-ai-cli/pkg/config/flags"
 	"github.com/TomaszDomagala/ask-ai-cli/pkg/openai"
 
 	"github.com/rs/zerolog"
@@ -55,19 +54,20 @@ Example:
 		var err error
 		cfg := GetGlobalConfig(cmd.Context())
 
-		if globalConfig.ConfigFile.Get() != "" {
-			cfg.SetConfigFile(globalConfig.ConfigFile.Get())
-		} else {
-			cfg.SetConfigName(configFileName)
-			cfg.SetConfigType(configFileType)
-			for _, path := range defaultConfigPaths {
-				cfg.AddConfigPath(path)
-			}
+		cfg.SetConfigName(configFileName)
+		cfg.SetConfigType(configFileType)
+		for _, path := range defaultConfigPaths {
+			cfg.AddConfigPath(path)
 		}
 
 		err = cfg.ReadInConfig()
 		if err != nil {
-			return fmt.Errorf("failed to read config: %w", err)
+			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+				return fmt.Errorf("failed to read config: %w", err)
+			}
+
+			// We cannot log here, because the logger is not configured yet
+			// we will log it later
 		}
 
 		// Setup config by attaching viper to the config struct
@@ -84,6 +84,12 @@ Example:
 		}
 		// From now on, we can use loggers
 		zerolog.SetGlobalLevel(loglevel)
+
+		if cfg.ConfigFileUsed() != "" {
+			log.Info().Msgf("Using config file: %s", cfg.ConfigFileUsed())
+		} else {
+			log.Warn().Msgf("No config file found, using defaults")
+		}
 
 		return nil
 	},
@@ -140,9 +146,8 @@ func Execute() {
 }
 
 type GlobalConfig struct {
-	ConfigFile flags.Flag[string]
-	Provider   config.Value[string]
-	LogLevel   config.Value[string]
+	Provider config.Value[string]
+	LogLevel config.Value[string]
 
 	OpenAiConfig
 }
@@ -167,9 +172,8 @@ var globalConfig GlobalConfig
 func init() {
 	// define global config
 	globalConfig = GlobalConfig{
-		ConfigFile: flags.String(rootCmd.PersistentFlags(), "config", "", fmt.Sprintf("config file - if not provided, the following paths will be checked: %v", fmt.Sprint(defaultConfigPaths))),
-		Provider:   config.String("provider", config.WithFlag(rootCmd.PersistentFlags(), "provider", "openai", "provider to use for suggestions")),
-		LogLevel:   config.String("loglevel", config.WithFlag(rootCmd.PersistentFlags(), "loglevel", "disabled", "log level (zerolog)")),
+		Provider: config.String("provider", config.WithFlag(rootCmd.PersistentFlags(), "provider", "openai", "provider to use for suggestions")),
+		LogLevel: config.String("loglevel", config.WithFlag(rootCmd.PersistentFlags(), "loglevel", "disabled", "log level (zerolog)")),
 
 		OpenAiConfig: OpenAiConfig{
 			ApiKey:           config.String("openai.apikey", config.WithFlag(rootCmd.PersistentFlags(), "openai-apikey", "", "openai api key")),
