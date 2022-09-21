@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/TomaszDomagala/ask-ai-cli/pkg/errs"
 	"os"
 	"path/filepath"
 
@@ -32,9 +34,14 @@ var (
 	firstDefaultConfigFile = filepath.Join(defaultConfigPaths[0], configFileName+"."+configFileType)
 )
 
+var (
+	// errNoQueryArg is returned when no query argument is provided
+	errNoQueryArg = errors.New("no query argument provided")
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   `aai [query]`,
+	Use:   `aai <query>`,
 	Short: "Ask AI to suggest a command",
 	Long: `
 ask-ai-cli (aai)
@@ -46,10 +53,16 @@ but rather to read the documentation and understand
 what the command does before running it.
 
 Example:
-    aai "show files with size greater than 1MB"
+    $ aai "show files with size greater than 1MB"
+	find . -size +1M
 `,
 
-	Args: cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 {
+			return errs.New(errNoQueryArg, "Please provide a query argument")
+		}
+		return nil
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg := GetGlobalConfig(cmd.Context())
@@ -140,7 +153,13 @@ func Execute() {
 
 	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
+		var cmdErr *errs.CmdError
+		if errors.As(err, &cmdErr) {
+			_, _ = fmt.Fprintln(os.Stderr, cmdErr.Msg)
+		} else {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+		}
+
 		os.Exit(1)
 	}
 }

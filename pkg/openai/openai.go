@@ -17,7 +17,7 @@ const (
 
 	// queryPrefixSequence is a sequence of tokens that is used to prefix the query.
 	// it is also used as stop sequence to terminate the completion.
-	queryPrefixSequence = "command-query"
+	queryPrefixSequence = "query"
 )
 
 type Client struct {
@@ -33,9 +33,21 @@ func NewClient(config Config) *Client {
 
 // Suggest suggests a command for a given query.
 func (c *Client) Suggest(query string) (string, error) {
+	prompt := suggestPrompt(query)
+	return c.doRequest(prompt)
+}
+
+// Explain explains a command.
+func (c *Client) Explain(command string) (string, error) {
+	prompt := explainPrompt(command)
+	return c.doRequest(prompt)
+}
+
+// doRequest performs a request to the OpenAI API.
+func (c *Client) doRequest(prompt string) (string, error) {
 	reqBody := requestBody{
 		RequestBase: c.Config.RequestBase,
-		Prompt:      prompt(query),
+		Prompt:      prompt,
 		Stop:        []string{queryPrefixSequence},
 	}
 	jsonReqBody, err := json.Marshal(reqBody)
@@ -59,7 +71,13 @@ func (c *Client) Suggest(query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
-	defer res.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to close response body")
+		}
+	}(res.Body)
+
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
@@ -114,18 +132,39 @@ type responseBody struct {
 }
 
 /*
-prompt creates a prompt for a completion request.
+suggestPrompt creates a prompt for a completion request.
 Example of a prompt with a query "show current directory":
 
-	command-query: create foo directory:
-	mkdir foo
-	command-query: show current directory:
+	query: create foo directory:
+	answer: mkdir foo
+	query: show current directory:
+	answer:
 */
-func prompt(query string) string {
-	return fmt.Sprintf("%s\n%s\n%s\n", promptQuery("create foo directory"), "mkdir foo", promptQuery(query))
+func suggestPrompt(query string) string {
+	var builder strings.Builder
+	// Prompt example:
+	builder.WriteString("query: create foo directory\n")
+	builder.WriteString("answer: mkdir foo\n")
+	// Actual prompt:
+	builder.WriteString("query: ")
+	builder.WriteString(query)
+	builder.WriteString("\n")
+	builder.WriteString("answer: ")
+
+	return builder.String()
 }
 
-// promptQuery creates the query part of a prompt.
-func promptQuery(query string) string {
-	return fmt.Sprintf("%s: %s:", queryPrefixSequence, query)
+// explainPrompt creates a prompt for an explanation request.
+func explainPrompt(command string) string {
+	var builder strings.Builder
+	// Prompt example:
+	builder.WriteString("query: cd $HOME\n")
+	builder.WriteString("answer:\nChange the current directory to the home directory\n")
+	//	Actual command:
+	builder.WriteString("query: ")
+	builder.WriteString(command)
+	builder.WriteString("\n")
+	builder.WriteString("answer:\n")
+
+	return builder.String()
 }
